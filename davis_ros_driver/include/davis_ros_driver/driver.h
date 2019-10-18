@@ -1,4 +1,5 @@
 // This file is part of DVS-ROS - the RPG DVS ROS Package
+// modified to publish raw events instead of array of event structs
 
 #pragma once
 
@@ -11,8 +12,7 @@
 #include <boost/date_time/posix_time/posix_time.hpp>
 
 // messages
-#include <dvs_msgs/Event.h>
-#include <dvs_msgs/EventArray.h>
+#include <dvs_msgs/RawEventArray.h>
 #include <std_msgs/Empty.h>
 #include <std_msgs/Time.h>
 #include <sensor_msgs/Imu.h>

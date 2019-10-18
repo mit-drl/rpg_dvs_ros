@@ -1,4 +1,5 @@
 // This file is part of DVS-ROS - the RPG DVS ROS Package
+// modified to publish raw events instead of array of event structs
 
 #include "davis_ros_driver/driver.h"
 #include "davis_ros_driver/driver_utils.h"
@@ -51,7 +52,7 @@ DavisRosDriver::DavisRosDriver(ros::NodeHandle & nh, ros::NodeHandle nh_private)
   if (ns == "/")
     ns = "/dvs";
 
-  event_array_pub_ = nh_.advertise<dvs_msgs::EventArray>(ns + "/events", 10);
+  event_array_pub_ = nh_.advertise<dvs_msgs::RawEventArray>(ns + "/events", 10);
   camera_info_pub_ = nh_.advertise<sensor_msgs::CameraInfo>(ns + "/camera_info", 1);
   imu_pub_ = nh_.advertise<sensor_msgs::Imu>(ns + "/imu", 10);
   image_pub_ = nh_.advertise<sensor_msgs::Image>(ns + "/image_raw", 1);
@@ -635,7 +636,7 @@ void DavisRosDriver::readout()
 
     boost::posix_time::ptime next_send_time = boost::posix_time::microsec_clock::local_time();
 
-    dvs_msgs::EventArrayPtr event_array_msg;
+    dvs_msgs::RawEventArrayPtr event_array_msg;
 
     while (running_)
     {
@@ -664,7 +665,7 @@ void DavisRosDriver::readout()
                 {
                     if (!event_array_msg)
                     {
-                        event_array_msg = dvs_msgs::EventArrayPtr(new dvs_msgs::EventArray());
+                        event_array_msg = dvs_msgs::RawEventArrayPtr(new dvs_msgs::RawEventArray());
                         event_array_msg->height = davis_info_.dvsSizeY;
                         event_array_msg->width = davis_info_.dvsSizeX;
                     }
@@ -677,26 +678,24 @@ void DavisRosDriver::readout()
                         // Get full timestamp and addresses of first event.
                         caerPolarityEvent event = caerPolarityEventPacketGetEvent(polarity, j);
 
-                        dvs_msgs::Event e;
-                        e.x = caerPolarityEventGetX(event);
-                        e.y = caerPolarityEventGetY(event);
-                        e.ts = reset_time_
-                                + ros::Duration().fromNSec(caerPolarityEventGetTimestamp64(event, polarity) * 1000);
-                        e.polarity = caerPolarityEventGetPolarity(event);
-
                         if(j == 0)
                         {
-                            event_array_msg->header.stamp = e.ts;
+                            event_array_msg->header.stamp = reset_time_
+                                + ros::Duration().fromNSec(caerPolarityEventGetTimestamp64(event, polarity) * 1000);
                         }
 
-                        event_array_msg->events.push_back(e);
+                        event_array_msg->x.push_back(caerPolarityEventGetX(event));
+                        event_array_msg->y.push_back(caerPolarityEventGetY(event));
+                        event_array_msg->ts.push_back(reset_time_
+                                + ros::Duration().fromNSec(caerPolarityEventGetTimestamp64(event, polarity) * 1000));
+                        event_array_msg->polarity.push_back(caerPolarityEventGetPolarity(event));
                     }
 
                     // throttle event messages
                     if (boost::posix_time::microsec_clock::local_time() > next_send_time ||
                             current_config_.streaming_rate == 0 ||
-                            (current_config_.max_events != 0 && event_array_msg->events.size() > current_config_.max_events)
-                            )
+                            (current_config_.max_events != 0 && event_array_msg->x.size() > current_config_.max_events)
+                        )
                     {
                         event_array_pub_.publish(event_array_msg);
 
@@ -704,7 +703,7 @@ void DavisRosDriver::readout()
                         {
                             next_send_time += delta_;
                         }
-                        if (current_config_.max_events != 0 && event_array_msg->events.size() > current_config_.max_events)
+                        if (current_config_.max_events != 0 && event_array_msg->x.size() > current_config_.max_events)
                         {
                             next_send_time = boost::posix_time::microsec_clock::local_time() + delta_;
                         }
