@@ -1,4 +1,6 @@
 // This file is part of DVS-ROS - the RPG DVS ROS Package
+// modified to publish events integrated into event frames
+// first two channels representing positive and negative, third channel is zero
 
 #include "davis_ros_driver/driver.h"
 #include "davis_ros_driver/driver_utils.h"
@@ -51,7 +53,7 @@ DavisRosDriver::DavisRosDriver(ros::NodeHandle & nh, ros::NodeHandle nh_private)
   if (ns == "/")
     ns = "/dvs";
 
-  event_array_pub_ = nh_.advertise<dvs_msgs::EventArray>(ns + "/events", 10);
+  event_frame_pub_ = nh_.advertise<sensor_msgs::Image>(ns + "/event_frame", 1);
   camera_info_pub_ = nh_.advertise<sensor_msgs::CameraInfo>(ns + "/camera_info", 1);
   imu_pub_ = nh_.advertise<sensor_msgs::Imu>(ns + "/imu", 10);
   image_pub_ = nh_.advertise<sensor_msgs::Image>(ns + "/image_raw", 1);
@@ -635,7 +637,13 @@ void DavisRosDriver::readout()
 
     boost::posix_time::ptime next_send_time = boost::posix_time::microsec_clock::local_time();
 
-    dvs_msgs::EventArrayPtr event_array_msg;
+    sensor_msgs::Image event_frame_msg;
+    event_frame_msg.encoding = "rgb8";
+    event_frame_msg.width = davis_info_.dvsSizeX;
+    event_frame_msg.height = davis_info_.dvsSizeY;
+    event_frame_msg.step = event_frame_msg.width * 3;
+    event_frame_msg.data.resize(event_frame_msg.height * event_frame_msg.step);
+    std::fill(event_frame_msg.data.begin(), event_frame_msg.data.end(), 0);
 
     while (running_)
     {
@@ -662,12 +670,6 @@ void DavisRosDriver::readout()
                 // Packet 0 is always the special events packet for DVS128, while packet is the polarity events packet.
                 if (type == POLARITY_EVENT)
                 {
-                    if (!event_array_msg)
-                    {
-                        event_array_msg = dvs_msgs::EventArrayPtr(new dvs_msgs::EventArray());
-                        event_array_msg->height = davis_info_.dvsSizeY;
-                        event_array_msg->width = davis_info_.dvsSizeX;
-                    }
 
                     caerPolarityEventPacket polarity = (caerPolarityEventPacket) packetHeader;
 
@@ -677,39 +679,31 @@ void DavisRosDriver::readout()
                         // Get full timestamp and addresses of first event.
                         caerPolarityEvent event = caerPolarityEventPacketGetEvent(polarity, j);
 
-                        dvs_msgs::Event e;
-                        e.x = caerPolarityEventGetX(event);
-                        e.y = caerPolarityEventGetY(event);
-                        e.ts = reset_time_
+                        int e_x = caerPolarityEventGetX(event);
+                        int e_y = caerPolarityEventGetY(event);
+                        bool e_polarity = caerPolarityEventGetPolarity(event);
+                        int pos = e_y * event_frame_msg.step + e_x * 3 + e_polarity;
+
+                        if (event_frame_msg.data[pos] < 255) // prevent overflow
+                            event_frame_msg.data[pos]++; // feed this into model
+//                            event_frame_msg.data[pos] = 255 // use this for display purpose (visualize)
+
+                        if (j == 0)
+                            event_frame_msg.header.stamp = reset_time_
                                 + ros::Duration().fromNSec(caerPolarityEventGetTimestamp64(event, polarity) * 1000);
-                        e.polarity = caerPolarityEventGetPolarity(event);
-
-                        if(j == 0)
-                        {
-                            event_array_msg->header.stamp = e.ts;
-                        }
-
-                        event_array_msg->events.push_back(e);
                     }
 
-                    // throttle event messages
+                    // throttle event messages NOTE: WE DON'T CARE ABOUT max_event
                     if (boost::posix_time::microsec_clock::local_time() > next_send_time ||
-                            current_config_.streaming_rate == 0 ||
-                            (current_config_.max_events != 0 && event_array_msg->events.size() > current_config_.max_events)
-                            )
+                            current_config_.streaming_rate == 0)
                     {
-                        event_array_pub_.publish(event_array_msg);
+                        event_frame_pub_.publish(event_frame_msg);
+                        std::fill(event_frame_msg.data.begin(), event_frame_msg.data.end(), 0);
 
                         if (current_config_.streaming_rate > 0)
                         {
                             next_send_time += delta_;
                         }
-                        if (current_config_.max_events != 0 && event_array_msg->events.size() > current_config_.max_events)
-                        {
-                            next_send_time = boost::posix_time::microsec_clock::local_time() + delta_;
-                        }
-
-                        event_array_msg.reset();
                     }
 
                     if (camera_info_manager_->isCalibrated())

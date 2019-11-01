@@ -1,4 +1,6 @@
 // This file is part of DVS-ROS - the RPG DVS ROS Package
+// modified to publish events integrated into event frames
+// first two channels representing positive and negative, third channel is zero
 
 #pragma once
 
@@ -11,8 +13,6 @@
 #include <boost/date_time/posix_time/posix_time.hpp>
 
 // messages
-#include <dvs_msgs/Event.h>
-#include <dvs_msgs/EventArray.h>
 #include <std_msgs/Empty.h>
 #include <std_msgs/Time.h>
 #include <sensor_msgs/Imu.h>
@@ -50,7 +50,7 @@ private:
                           const uint32_t current_exposure) const;
 
   ros::NodeHandle nh_;
-  ros::Publisher event_array_pub_;
+  ros::Publisher event_frame_pub_;
   ros::Publisher camera_info_pub_;
   ros::Publisher imu_pub_;
   ros::Publisher image_pub_;
